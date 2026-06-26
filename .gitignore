@@ -1,0 +1,20 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.sln.docstates
+.vs/
+*.csproj.user
+*.dbmdl
+*.jfm
+
+## User Secrets
+secrets.json
+
+## Node / Scalar CDN cache (if any)
+node_modules/
+
+## OS
+.DS_Store
+Thumbs.db

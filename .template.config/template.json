@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "YourName",
+  "classifications": [
+    "Azure",
+    "Functions",
+    "Clean Architecture",
+    "CQRS"
+  ],
+  "identity": "FunctionTemplate.CleanArchitecture",
+  "name": "Azure Functions Clean Architecture",
+  "description": "Clean architecture template for Azure Functions isolated worker with Cortex.Mediator (CQRS), FluentValidation, OpenTelemetry, Redis cache, and custom attribute-driven model binding.",
+  "shortName": "func-clean",
+  "sourceName": "FunctionTemplate",
+  "preferNameDirectory": true,
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sources": [
+    {
+      "modifiers": [
+        {
+          "exclude": [
+            ".template.config/**",
+            "bin/**",
+            "obj/**"
+          ]
+        }
+      ]
+    }
+  ],
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "description": "The target framework for the project.",
+      "datatype": "choice",
+      "choices": [
+        {
+          "choice": "net10.0",
+          "description": "Target .NET 10"
+        },
+        {
+          "choice": "net9.0",
+          "description": "Target .NET 9"
+        }
+      ],
+      "defaultValue": "net10.0",
+      "replaces": "net10.0"
+    },
+    "AzureFunctionsVersion": {
+      "type": "parameter",
+      "description": "Azure Functions runtime version (v4 is the only supported).",
+      "datatype": "choice",
+      "choices": [
+        {
+          "choice": "v4",
+          "description": "Azure Functions v4"
+        }
+      ],
+      "defaultValue": "v4",
+      "replaces": "v4"
+    },
+    "SkipRestore": {
+      "type": "parameter",
+      "datatype": "bool",
+      "description": "Skips automatic restore of NuGet packages.",
+      "defaultValue": "false"
+    }
+  },
+  "postActions": [
+    {
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "description": "Restore NuGet packages",
+      "condition": "(!SkipRestore)",
+      "continueOnError": true,
+      "manualInstructions": [
+        {
+          "text": "Run 'dotnet restore'"
+        }
+      ]
+    }
+  ]
+}
