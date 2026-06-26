@@ -60,9 +60,11 @@ dotnet new func-clean -n MiNuevaApi --SkipRestore true
 
 ```
 ├── FunctionTemplate.Host/              ← Entry point (Azure Functions)
-│   ├── Functions/                      ← HTTP Triggers
+│   ├── Functions/                      ← Triggers
 │   │   ├── SampleGetFunction.cs        ← GET sample
-│   │   └── SamplePostFunction.cs       ← POST sample
+│   │   ├── SamplePostFunction.cs       ← POST sample
+│   │   ├── SampleTimerFunction.cs      ← TimerTrigger sample
+│   │   └── SampleQueueFunction.cs      ← QueueTrigger sample
 │   ├── Installers/                     ← DI module registration
 │   │   ├── AzureInstaller.cs           ← Azure services
 │   │   ├── InstalleHttpClient.cs       ← HTTP clients
@@ -78,8 +80,10 @@ dotnet new func-clean -n MiNuevaApi --SkipRestore true
 │
 ├── FunctionTemplate.Application/       ← Lógica de aplicación
 │   ├── Handlers/
-│   │   ├── Commands/CreateSample/      ← Command + Handler + Validator
-│   │   └── Queries/Sample/             ← Query + Handler + Validator
+│   │   ├── Commands/CreateSample/      ← Command + Handler + Validator (POST)
+│   │   ├── Commands/ProcessTimer/      ← Command + Handler (TimerTrigger)
+│   │   ├── Commands/ProcessQueueMessage/ ← Command + Handler (QueueTrigger)
+│   │   └── Queries/Sample/             ← Query + Handler + Validator (GET)
 │   └── Models/
 │       ├── Requests/
 │       └── Responses/
@@ -124,6 +128,16 @@ Handler                       ← QueryHandler / CommandHandler
 Response                      ← DTO de respuesta
 ```
 
+El mismo patrón funciona con triggers no-HTTP. En esos casos el trigger crea el comando manualmente:
+
+```
+TimerTrigger / QueueTrigger
+     ↓
+Cortex.Mediator               ← CQRS dispatcher
+     ↓
+Handler                       ← CommandHandler (fire-and-forget, sin respuesta)
+```
+
 ### GET sample
 
 ```
@@ -146,6 +160,27 @@ POST /api/SamplePost  { "name": "MiItem", "description": "..." }
           → CreateSampleResponse { Id = guid, Name = "MiItem", CreatedAt = utc }
 ```
 
+### Timer sample
+
+```
+⏰ Cada 5 minutos
+  → SampleTimerFunction
+    → ProcessTimerCommand { ScheduledTime }
+      → ProcessTimerCommandHandler
+        → log "Timer triggered at {Now}. Scheduled time was {Scheduled}."
+```
+
+### Queue sample
+
+```
+📥 Mensaje en "sample-queue"
+  → SampleQueueFunction
+    → Deserializa JSON
+      → ProcessQueueMessageCommand { MessageId, Content, EnqueuedAt }
+        → ProcessQueueMessageCommandHandler
+          → log "Queue message {MessageId} processed."
+```
+
 ---
 
 ## 📦 Stack Tecnológico
@@ -162,12 +197,14 @@ POST /api/SamplePost  { "name": "MiItem", "description": "..." }
 | Scalar | 2.16.2 | UI de referencia OpenAPI |
 | StackExchange.Redis | 2.13.17 | Caché distribuida (opcional) |
 | Microsoft.Extensions.Caching | 10.0.9 | MemoryCache + Redis |
+| Functions.Worker.Extensions.Timer | 4.3.1 | TimerTrigger |
+| Functions.Worker.Extensions.Storage.Queues | 5.5.0 | QueueTrigger |
 
 ---
 
 ## 💡 Samples Incluidos
 
-El template viene con dos endpoints funcionales que muestran el patrón completo:
+El template viene con cuatro triggers funcionales que muestran el patrón completo:
 
 ### `GET /api/SampleGet`
 
@@ -186,6 +223,24 @@ Ejemplo de **Command** con body JSON y validación.
 - **Validator**: `CreateSampleCommandValidator` — Name not empty + max 100, Description max 500
 - **Handler**: `CreateSampleCommandHandler` — genera ID y timestamp
 - **Response**: `CreateSampleResponse { Id, Name, Description, CreatedAt }`
+
+### `TimerTrigger` — cada 5 minutos
+
+Ejemplo de **ICommand fire-and-forget** con trigger temporizado. Demuestra que CQRS funciona también en procesos batch sin HTTP.
+
+- **Command**: `ProcessTimerCommand` — `ScheduledTime` (próxima ejecución esperada)
+- **Handler**: `ProcessTimerCommandHandler` — log con timestamp
+- **Trigger**: `[TimerTrigger("0 */5 * * * *")]` — cada 5 minutos
+
+### `QueueTrigger` — mensajes en cola
+
+Ejemplo de **ICommand fire-and-forget** con Azure Storage Queue. Procesa mensajes JSON de forma asincrónica.
+
+- **Command**: `ProcessQueueMessageCommand` — `MessageId`, `Content`, `EnqueuedAt`
+- **Handler**: `ProcessQueueMessageCommandHandler` — log del contenido
+- **Trigger**: `[QueueTrigger("sample-queue", Connection = "AzureWebJobsStorage")]`
+
+> ⚠️ Para probar QueueTrigger necesitás **Azure Storage Emulator** o una connection string real en `AzureWebJobsStorage`.
 
 ---
 
@@ -295,6 +350,52 @@ public class ListItemsFunction
 ### Cómo agregar un nuevo endpoint (POST)
 
 Mismo patrón pero con `ICommand<T>`, `ICommandHandler<T1, T2>`, atributos `[FromBodyJson]`, y `mediator.SendCommandAsync(...)`.
+
+### Cómo agregar un trigger no-HTTP (Timer, Queue)
+
+Los triggers que no reciben HTTP no usan `BindObject`. Creás el comando manualmente y lo enviás al mediator:
+
+```csharp
+// 1. Command (sin respuesta)
+public class GenerateReportCommand : ICommand
+{
+    public DateTime ExecutedAt { get; init; }
+}
+
+// 2. Handler
+public class GenerateReportCommandHandler : ICommandHandler<GenerateReportCommand>
+{
+    public Task Handle(GenerateReportCommand command, CancellationToken ct)
+    {
+        // tu lógica acá
+        return Task.CompletedTask;
+    }
+}
+
+// 3. Function con TimerTrigger
+public class GenerateReportFunction
+{
+    [Function("GenerateReport")]
+    public async Task Run([TimerTrigger("0 0 3 * * *")] TimerInfo timer)
+    {
+        var command = new GenerateReportCommand { ExecutedAt = DateTime.UtcNow };
+        await mediator.SendCommandAsync(command);
+    }
+}
+
+// 4. Function con QueueTrigger
+public class ProcessUploadFunction
+{
+    [Function("ProcessUpload")]
+    public async Task Run([QueueTrigger("uploads")] string message)
+    {
+        var command = JsonConvert.DeserializeObject<ProcessUploadCommand>(message);
+        await mediator.SendCommandAsync(command);
+    }
+}
+```
+
+> Para triggers no-HTTP se usa `ICommand` sin respuesta. El handler normalmente loguea, persiste, o encola más trabajo.
 
 ### Cómo agregar un servicio
 
